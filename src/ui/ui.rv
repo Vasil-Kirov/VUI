@@ -322,7 +322,7 @@ make_widget :: fn(T: type, vtable: *WidgetVTable) -> *T {
 	widget.w.flags = .Visible | .Enabled;
 	widget.w.desired_w = WIDGET_SIZE_WRAP;
 	widget.w.desired_h = WIDGET_SIZE_WRAP;
-	widget.w.self_align = .Default;
+	widget.w.self_align = .Auto;
 
 
 	return widget;

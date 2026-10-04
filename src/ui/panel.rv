@@ -12,7 +12,7 @@ Direction :: enum {
 }
 
 Align :: enum {
-	Default,
+	Auto,
 	Center,
 	Start,
 }
@@ -161,7 +161,7 @@ panel_arrange :: fn(w: *Widget, Bounds) #nocheck {
 
 		cross_pos := 0;
 		align_items := p.align_items;
-		if child.self_align != .Default
+		if child.self_align != .Auto
 			align_items = child.self_align;
 		switch align_items {
 			case .Center: cross_pos = (if is_row then content.pos[1] else content.pos[0]) as int + (cross_avail - outer_cross) / 2;
@@ -199,7 +199,7 @@ panel_paint :: fn(w: *Widget) {
 }
 
 panel_set_alignment :: fn(w: *Widget, align: Align) {
-	if align == .Default
+	if align == .Auto
 		return;
 
 	p := cast(*Panel, w);
