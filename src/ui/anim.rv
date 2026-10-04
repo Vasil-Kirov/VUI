@@ -1,0 +1,117 @@
+module ui;
+
+Easing :: enum {
+	Linear,
+	InQuad,
+	OutQuad,
+	InOutQuad,
+	InCubic,
+	OutCubic,
+	InOutCubic,
+	OutBounce,
+	OutElastic,
+	OutBack,
+}
+
+PI :: 3.14159265358979323846;
+
+apply_easing :: fn(t: f32, ease: Easing) -> f32 {
+	return switch ease {
+		case .Linear:      yield t;
+		case .InQuad:      yield t * t;
+		case .OutQuad:     yield t * (2.0 - t);
+		case .InOutQuad:   yield if t < 0.5 then (2.0 * t * t) else -1.0 + (4.0 - 2.0 * t) * t;
+		case .InCubic:     yield t * t * t;
+		case .OutCubic: {
+			p := t - 1.0;
+			yield p * p * p + 1.0;
+		}
+		case .InOutCubic: yield if t < 0.5 then (4.0 * t * t * t) else ((t - 1.0) * (2.0 * t - 2.0) * (2.0 * t - 2.0) + 1.0);
+		case .OutBounce: {
+			n1 :: 7.5625;
+			d1 :: 2.75;
+			if (t < 1.0 / d1) yield n1 * t * t;
+			if (t < 2.0 / d1) { t -= 1.5 / d1;   yield n1 * t * t + 0.75; }
+			if (t < 2.5 / d1) { t -= 2.25 / d1;  yield n1 * t * t + 0.9375; }
+			t -= 2.625 / d1; yield n1 * t * t + 0.984375;
+		}
+		case .OutElastic: {
+			if (t == 0.0 || t == 1.0) yield t;
+			c4 := (2.0 * PI) / 3.0;
+			yield pow(2.0, -10.0 * t) * sin((t * 10.0 - 0.75) * c4) + 1.0;
+		}
+		case .OutBack: {
+			c1 :: 1.70158;
+			c3 := c1 + 1.0;
+			p := t - 1.0;
+			yield 1.0 + c3 * p * p * p + c1 * p * p;
+		}
+		case _: yield t;
+	};
+}
+
+Animation :: struct {
+	value: *f32,
+	from: f32,
+	to: f32,
+	elapsed_ms: f32,
+	duration_ms: f32,
+	easing: Easing,
+	owner: *Widget,
+	on_completion: ?*fn(*Widget, ?*void),
+	on_completion_data: ?*void,
+
+	next: ?*Animation,
+}
+
+tween_f32 :: fn(w: *Widget, value: *f32, to: f32, duration_ms: f32, easing: Easing) -> *Animation {
+	anim := memory_alloc(cast(u32, size_of Animation)) as *Animation;
+	memset(anim, 0, size_of Animation);
+
+	anim.value = value;
+	anim.from = *value;
+	anim.to = to;
+	anim.duration_ms = duration_ms;
+	anim.easing = easing;
+	anim.owner = w;
+
+	anim.next = UI.anim_head;
+	UI.anim_head = anim;
+
+	return anim;
+}
+
+tween_set_on_completion :: fn(a: *Animation, handler: *fn(*Widget, ?*void), data: ?*void) {
+	a.on_completion = handler;
+	a.on_completion_data = data;
+}
+
+anim_tick :: fn() #nocheck {
+	ms := get_ms();
+	last_update := UI.last_update_ms;
+	UI.last_update_ms = ms;
+	delta_ms := ms-last_update;
+
+	pnode := &UI.anim_head;
+	for *pnode {
+		node := *pnode;
+
+		node.elapsed_ms += delta_ms as f32;
+		t := node.elapsed_ms / node.duration_ms;
+		if t > 1.0
+			t = 1.0;
+
+		et := apply_easing(t, node.easing);
+		*node.value = lerp(et, node.from, node.to);
+
+		if t >= 1.0 {
+			if node.on_completion
+				node.on_completion(node.owner, node.on_completion_data);
+			*pnode = node.next;
+			memory_free(node);
+		} else {
+			pnode = &node.next;
+		}
+	}
+}
+

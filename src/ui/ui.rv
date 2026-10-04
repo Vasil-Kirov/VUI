@@ -1,0 +1,916 @@
+module ui;
+
+_ :: #import misc;
+
+PrimaryColor :: v4 { 0.22745098039215686, 0.5254901960784314, 1.0, 1.0 };
+DarkenFactor :: 0.8;
+
+iv2 :: [2]int;
+
+Bounds :: struct {
+	pos:  iv2,
+	size: iv2,
+}
+
+MAX_CLIP_STACK :: 1024;
+
+UIState :: struct {
+	clip_stack: [MAX_CLIP_STACK]Bounds,
+	at_clip: int,
+	window_width: int,
+	window_height: int,
+	commands: CommandBuffer,
+	style: ?*Style,
+
+	hovered: ?*Widget,
+	focused: ?*Widget,
+	captured_mouse: ?*Widget,
+
+	anim_head: ?*Animation,
+	last_update_ms: u64,
+}
+
+UI: UIState = .{};
+
+iv2_to_v2 :: fn(v: iv2) -> v2 {
+	return .{v[0] as f32, v[1] as f32};
+}
+
+ui_clamp :: fn(x: $T, a: T, b: T) -> T {
+	if x < a return a;
+	if x > b return b;
+	return x;
+}
+
+RGB :: fn(r: int, g: int, b: int) -> v4 {
+	return .{r as f32 / 255, g as f32 / 255, b as f32 / 255, 1.0};
+}
+
+RGBA :: fn(r: int, g: int, b: int, a: int) -> v4 {
+	return .{r as f32 / 255, g as f32 / 255, b as f32 / 255, a as f32 / 255};
+}
+
+color_lerp :: fn(a: v4, b: v4, t: f32) -> v4 {
+    return .{
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+        a[3] + (b[3] - a[3]) * t,
+    };
+}
+
+color_darken :: fn(c: v4, amount: f32) -> v4 {
+    return .{
+        c[0] * (1.0 - amount),
+        c[1] * (1.0 - amount),
+        c[2] * (1.0 - amount),
+        c[3]
+    };
+}
+
+lerp :: fn(t: f32, a: f32, b: f32) -> f32 {
+	return a + (b - a) * t;
+}
+
+darken :: fn(c: v4) -> v4 {
+	r := c * v4{DarkenFactor, DarkenFactor, DarkenFactor, DarkenFactor};
+	r[3] = c[3];
+	return r;
+}
+
+CommandType :: enum: u8 {
+	DrawBox,
+	DrawTexture,
+	DrawText,
+	DrawLine,
+	ClipRect,
+}
+
+DrawCommandBox :: struct {
+	tag: CommandType,
+	bound: Bounds,
+	color: v4,
+	darken_eff: f32,
+	top_radius: int,
+	bot_radius: int,
+}
+
+DrawCommandTexture :: struct {
+	tag: CommandType,
+	bound: Bounds,
+	t00: v2,
+	t11: v2,
+	texture: GPUTexture,
+}
+
+DrawCommandText :: struct {
+	tag: CommandType,
+	text: string,
+	pos: iv2,
+	col: v4,
+	centered: bool,
+	font_h: int,
+}
+
+DrawCommandLine :: struct {
+	tag: CommandType,
+	from: iv2,
+	to: iv2,
+	width_px: int,
+	color: v4,
+}
+
+DrawCommandClip :: struct {
+	tag: CommandType,
+	bounds: Bounds,
+}
+
+DrawCommand :: union {
+	tag: CommandType,
+	box: DrawCommandBox,
+	texture: DrawCommandTexture,
+	text: DrawCommandText,
+	clip: DrawCommandClip,
+	line: DrawCommandLine,
+}
+
+WidgetEventType :: enum: u8 {
+	MouseEnter,
+	MouseLeave,
+	MouseMove,
+	MouseDown,
+	MouseUp,
+	MouseClick,
+	LoseFocus,
+	GainFocus,
+	TextInput,
+	KeyDown,
+	KeyUp,
+	Submit,
+}
+
+KeyCode :: enum: u32 {
+	Backspace,
+	LeftArrow,
+	RightArrow,
+	Tab,
+	Enter,
+	Esc,
+}
+
+WidgetEventMouseMove :: struct {
+	delta: v2,
+}
+
+WidgetEventMouseButton :: struct {
+	mouse_x: int,
+	mouse_y: int,
+	button: int,
+}
+
+WidgetEventTextInput :: struct {
+	written: string,
+}
+
+WidgetEventKey :: struct {
+	key: KeyCode,
+	shift_down: bool,
+	ctrl_down: bool,
+}
+
+WidgetEvent :: struct {
+	tag: WidgetEventType,
+	bubbles: bool,
+	u: union {
+		mousemove: WidgetEventMouseMove,
+		button: WidgetEventMouseButton,
+		text: WidgetEventTextInput,
+		key: WidgetEventKey,
+	}
+}
+
+WidgetVTable :: struct {
+	measure: ?*fn(*Widget, avail_w: int, avail_h: int),
+	arrange: ?*fn(*Widget, bounds_abs: Bounds),
+	paint:   ?*fn(*Widget),
+	on_event:?*fn(*Widget, *WidgetEvent),
+	destroy: ?*fn(*Widget),
+	identify: *fn() -> string,
+}
+
+WidgetFlag :: enum: u32 {
+	Visible = 1 << 0,
+	Enabled = 1 << 1,
+	Hovered = 1 << 2,
+	Pressed = 1 << 3,
+	Focused = 1 << 4,
+	Focusable = 1 << 5,
+	Selected = 1 << 6,
+	ExpandW = 1 << 7,
+	ExpandH = 1 << 8,
+	Dirty   = 1 << 9,
+}
+
+widget_has_flag : fn(*Widget, WidgetFlag) -> bool : (w, f) -> (w.flags & f) != 0;
+
+WIDGET_SIZE_WRAP :: -1;
+WIDGET_SIZE_FILL :: -2;
+
+Inset :: struct {
+	left: int,
+	right: int,
+	top: int,
+	bot: int,
+}
+
+Widget :: struct {
+	vtable: *WidgetVTable,
+	id: u32,
+	flags: WidgetFlag,
+	parent: ?*Widget,
+
+	prev: ?*Widget, // siblings
+	next: ?*Widget, //
+
+	//bounds: Bounds,     // bounds relative to parent (px)
+	bounds_abs: Bounds, // bounds in absolute window coords (px)
+
+	padding: Inset,
+	margin: Inset,
+
+	desired_w: int,
+	desired_h: int,
+
+	children: ?*Widget,
+
+	self_align: Align,
+	style: ?*Style, // inherit from parent if null
+
+	content_size: iv2,
+}
+
+CommandBuffer :: struct {
+	buf: []DrawCommand,
+	size: uint,
+	at: uint,
+}
+
+get_style :: fn(w: *Widget) -> *Style #nocheck {
+	for w {
+		if w.style return w.style;
+		w = w.parent;
+	}
+	if UI.style return UI.style;
+	return &theme_dark;
+}
+
+get_content_rect :: fn(w: *Widget) -> Bounds {
+	r := w.bounds_abs;
+	r.pos[0] += w.padding.left;
+	r.pos[1] += w.padding.top;
+	r.size[0] -= w.padding.left + w.padding.right;
+	r.size[1] -= w.padding.top + w.padding.bot;
+	if r.size[0] < 0 r.size[0] = 0;
+	if r.size[1] < 0 r.size[1] = 0;
+	return r;
+}
+
+layout_arrange :: fn(w: *Widget, bounds_abs: Bounds) {
+	w.bounds_abs = bounds_abs;
+
+	if !widget_has_flag(w, .Visible)
+		return;
+
+	arrange := w.vtable.arrange;
+	if arrange
+		arrange(w, bounds_abs);
+}
+
+layout_measure :: fn(w: *Widget, availw: int, availh: int) {
+	if !widget_has_flag(w, .Visible) {
+		w.content_size = .{};
+		return;
+	}
+
+	innerw := availw - w.padding.left - w.padding.right;
+	innerh := availh - w.padding.top - w.padding.bot;
+	if innerw < 0 innerw = 0;
+	if innerh < 0 innerh = 0;
+
+	measure := w.vtable.measure;
+	if measure
+		measure(w, innerw, innerh);
+	
+	if w.desired_w > 0 w.content_size[0] = w.desired_w - w.padding.left - w.padding.right;
+	if w.desired_h > 0 w.content_size[1] = w.desired_h - w.padding.top - w.padding.bot;
+}
+
+mark_dirty :: fn(w: *Widget) #nocheck {
+	for w {
+		w.flags |= .Dirty;
+		w = w.parent;
+	}
+}
+
+make_widget :: fn(T: type, vtable: *WidgetVTable) -> *T {
+	#static widget_id: u32 = 1;
+
+	widget := memory_alloc(cast(u32, size_of T)) as *T;
+	memset(widget, 0, size_of(T));
+	widget.w.vtable = vtable;
+	widget.w.id = widget_id++;
+	widget.w.flags = .Visible | .Enabled;
+	widget.w.desired_w = WIDGET_SIZE_WRAP;
+	widget.w.desired_h = WIDGET_SIZE_WRAP;
+	widget.w.self_align = .Default;
+
+
+	return widget;
+}
+
+add_child_widget :: fn(parent: *Widget, child: *Widget) #nocheck {
+	child.parent = parent;
+	if !parent.children {
+		parent.children = child;
+		return;
+	}
+	n := parent.children;
+	for n.next {
+		n = n.next;
+	}
+	n.next = child;
+	child.prev = n;
+	mark_dirty(parent);
+}
+
+init_ui :: fn() {
+	cmdp: *DrawCommand = memory_alloc(cast(u32, size_of DrawCommand) * 2048);
+	UI.commands.buf = cmdp[:2048];
+	UI.commands.size = 2048;
+	UI.commands.at = 0;
+	UI.style = &theme_dark;
+}
+
+push_cmd :: fn(cmd: DrawCommand) {
+	UI.commands.buf[UI.commands.at++] = cmd;
+}
+
+get_font : fn() -> *Font : () -> f;
+
+push_clip :: fn(bounds: Bounds) {
+	if UI.at_clip >= MAX_CLIP_STACK {
+		// @TODO: warning?
+		return;
+	}
+	clip := DrawCommandClip {
+		.ClipRect, bounds,
+	};
+	cmd: DrawCommand;
+	cmd.clip = clip;
+
+	push_cmd(cmd);
+
+	UI.clip_stack[UI.at_clip++] = bounds;
+
+}
+
+pop_clip :: fn() {
+	if UI.at_clip == 0
+		return;
+
+	UI.at_clip--;
+
+	if UI.at_clip == 0
+		return;
+
+	old_clip := UI.clip_stack[UI.at_clip - 1];
+	clip := DrawCommandClip {
+		.ClipRect, old_clip
+	};
+	
+	cmd: DrawCommand;
+	cmd.clip = clip;
+	push_cmd(cmd);
+}
+
+/*
+enqueue_text_command :: fn(pos: v2, size: v2, texture: GPUTexture, t00: v2, t11: v2) {
+	tex := DrawCommandTexture {
+		tag = .DrawTexture,
+		pos = pos,
+		size = size,
+		t00 = t00,
+		t11 = t11,
+		texture = texture,
+	};
+	cmd: DrawCommand;
+	cmd.texture = tex;
+
+	push_cmd(cmd);
+}
+*/
+
+enqueue_line_command :: fn(from: iv2, to: iv2, width_px: int, col: v4) {
+	line := DrawCommandLine { tag = .DrawLine, from = from, to = to, width_px = width_px, color = col };
+	cmd: DrawCommand;
+	cmd.line = line;
+
+	push_cmd(cmd);
+}
+
+enqueue_box_command :: fn(bound: Bounds, color: v4) {
+	box := DrawCommandBox {
+		tag = .DrawBox,
+		bound = bound,
+		color = color,
+	};
+	cmd: DrawCommand;
+	cmd.box = box;
+
+	push_cmd(cmd);
+}
+
+enqueue_rndbox_command :: fn(bound: Bounds, color: v4, darken_eff: f32, top_radius: int, bot_radius: int) {
+	box := DrawCommandBox {
+		tag = .DrawBox,
+		bound = bound,
+		color = color,
+		darken_eff = darken_eff,
+		top_radius = top_radius,
+		bot_radius = bot_radius,
+	};
+	cmd: DrawCommand;
+	cmd.box = box;
+
+	push_cmd(cmd);
+}
+
+enqueue_draw_text :: fn(text: string, pos: iv2, centered: bool = true, col: v4 = .{1, 1, 1, 1}, font_h: int = 20) {
+	txt := DrawCommandText {
+		tag = .DrawText,
+		text = text,
+		pos = pos,
+		col = col,
+		centered = centered,
+		font_h = font_h,
+	};
+	cmd: DrawCommand;
+	cmd.text = txt;
+
+	push_cmd(cmd);
+}
+
+draw_bordered_rndbox :: fn(bound: Bounds, fg_color: v4, border_color: v4, use_darken: f32 = 0.0, top_radius: int = 13, bot_radius: int = 13, border_thickness: int = 2) {
+	thck := iv2 {border_thickness, border_thickness};
+
+	border := bound;
+	bound := bound;
+	bound.pos += thck;
+	bound.size -= thck * .{2, 2};
+	enqueue_rndbox_command(border, border_color, 0.0, top_radius, bot_radius);
+	enqueue_rndbox_command(bound, fg_color, use_darken, top_radius, bot_radius);
+}
+
+set_padding :: fn(w: *Widget, padding: Inset) -> *Widget {
+	w.padding = padding;
+	return w;
+}
+
+set_margin :: fn(w: *Widget, margin: Inset) -> *Widget {
+	w.margin = margin;
+	return w;
+}
+
+is_in_box :: fn(p: v2, bl: v2, sz: v2) -> bool {
+	return p[0] >= bl[0] && p[0] <= bl[0] + sz[0] &&
+		p[1] >= bl[1] && p[1] <= bl[1] + sz[1];
+}
+
+measure_text :: fn(text: string, font_h: int = 20) -> v2 {
+	pxsz := measure_text_px(text, font_h);
+	return px_size_to_screen(pxsz);
+}
+
+config_window_size :: fn(font: *Font, sw: int, sh: int, pw: int, ph: int) {
+	f = font;
+	screen_width = sw;
+	screen_height = sh;
+	phy_width = pw;
+	phy_height = ph;
+
+	UI.window_width = sw;
+	UI.window_height = sh;
+	widget := _top_widget;
+	if widget {
+		mark_dirty(widget);
+	}
+}
+
+_top_widget: ?*Widget=null;
+set_top_widget :: fn(top: *Widget) {
+	_top_widget = top;
+}
+
+hit_test :: fn(root: *Widget, x: int, y: int) -> ?*Widget #nocheck {
+	if !widget_has_flag(root, .Visible)
+		return null;
+
+	r := root.bounds_abs;
+	if x < r.pos[0] || x >= r.pos[0] + r.size[0] || y < r.pos[1] || y > r.pos[1] + r.size[1] {
+		return null;
+	}
+	child := root.children;
+	if !child {
+		return root;
+	}
+
+	for child.next {
+		child = child.next;
+	}
+
+	for child {
+		hit := hit_test(child, x, y);
+		if hit return hit;
+		child = child.prev;
+	}
+
+	return root;
+}
+
+fire_event :: fn(root: *Widget, e: WidgetEvent) #nocheck {
+	if !widget_has_flag(root, .Visible)
+		return;
+
+	e := e;
+	e.bubbles = true; // handlers can set this to false to prevent bubbling
+	w := root;
+	for w {
+		if w.vtable.on_event
+			w.vtable.on_event(w, &e);
+
+		if !e.bubbles
+			return;
+		w = w.parent;
+	}
+}
+
+handle_mouse_move :: fn(mouse_abs: v2, delta: v2) {
+	root := _top_widget;
+	if !root
+		return;
+
+	hit := UI.captured_mouse;
+	if !hit
+		hit = hit_test(root, mouse_abs[0] as int, mouse_abs[1] as int);
+	if hit != UI.hovered {
+		hovered := UI.hovered;
+		if hovered {
+			hovered.flags &= ~.Hovered;
+			e := WidgetEvent { tag = .MouseLeave };
+			fire_event(hovered, e);
+		}
+		UI.hovered = hit;
+		if hit {
+			hit.flags |= .Hovered;
+			e := WidgetEvent { tag = .MouseEnter };
+			fire_event(hit, e);
+		}
+	}
+
+	if hit {
+		e := WidgetEvent {tag = .MouseMove};
+		e.u.mousemove = .{ delta = delta };
+		fire_event(hit, e);
+	}
+}
+
+clear_focus :: fn() {
+	focused := UI.focused;
+	if focused {
+		focused.flags &= ~.Focused;
+		e := WidgetEvent { tag = .LoseFocus };
+		fire_event(focused, e);
+		stop_text_input();
+		UI.focused = null;
+	}
+}
+
+focus_widget :: fn(w: *Widget) {
+	if !widget_has_flag(w, .Focusable)
+		return;
+
+	focused := UI.focused;
+	if focused == w
+		return;
+
+	clear_focus();
+	UI.focused = w;
+	w.flags |= .Focused;
+
+	e := WidgetEvent { tag = .GainFocus };
+	fire_event(w, e);
+}
+
+handle_mouse_button :: fn(at_mouse: v2, button: int, is_down: bool) {
+	root := _top_widget;
+	if !root
+		return;
+
+	// Left or Right
+	if button != 1 && button != 2
+		return;
+
+	target := UI.captured_mouse;
+	if !target
+		target = hit_test(root, at_mouse[0] as int, at_mouse[1] as int);
+
+	if is_down {
+		if target {
+			if widget_has_flag(target, .Focusable) {
+				focus_widget(target);
+			} else {
+				clear_focus();
+			}
+			if button == 1 {
+				UI.captured_mouse = target;
+				if target target.flags |= .Pressed;
+			}
+		}
+	} else {
+		if button == 1 {
+			captured := UI.captured_mouse;
+			if captured {
+				captured.flags &= ~.Pressed;
+			}
+			UI.captured_mouse = null;
+		}
+	}
+
+	if target {
+		e: WidgetEvent;
+		e.tag = if is_down then .MouseDown else .MouseUp;
+		e.u.button.mouse_x = at_mouse[0] as int;
+		e.u.button.mouse_y = at_mouse[1] as int;
+		e.u.button.button = button;
+		fire_event(target, e);
+		
+		if !is_down && widget_has_flag(target, .Enabled) {
+			hit := hit_test(root, at_mouse[0] as int, at_mouse[1] as int);
+			still_hovering := UI.hovered == target && hit == target;
+			if still_hovering {
+				e := WidgetEvent { tag = .MouseClick };
+				fire_event(target, e);
+			}
+		}
+	}
+}
+
+handle_text_input :: fn(text: string) #nocheck {
+	if len(text) == 0
+		return;
+
+	focused := UI.focused;
+	if focused == null
+		return;
+
+	e := WidgetEvent { tag = .TextInput };
+	e.u.text.written = text;
+	fire_event(focused, e);
+}
+
+handle_key_press :: fn(key: KeyCode, is_down: bool, shift: bool, ctrl: bool) {
+	focused := UI.focused;
+	if focused == null
+		return;
+
+	if key == .Esc {
+		clear_focus();
+		return;
+	}
+	
+	e := WidgetEvent { tag = if is_down then .KeyDown else .KeyUp };
+	e.u.key = .{key, shift, ctrl};
+	fire_event(focused, e);
+}
+
+paint_widget :: fn(w: *Widget) #nocheck {
+	if w.vtable.paint {
+		w.vtable.paint(w);
+	}
+
+	w = w.children;
+	for w {
+		defer w = w.next;
+		paint_widget(w);
+	}
+
+}
+
+ui_update :: fn() -> []DrawCommand {
+	widget := _top_widget;
+	if !widget
+		return .{};
+
+	anim_tick();
+
+	layout_measure(widget, UI.window_width, UI.window_height);
+	layout_arrange(widget, .{pos = .{}, size = .{UI.window_width, UI.window_height}});
+	paint_widget(widget);
+
+	r := UI.commands.buf[:UI.commands.at];
+	UI.commands.at = 0;
+	UI.at_clip = 0;
+	push_clip(widget.bounds_abs);
+
+	return r;
+}
+
+Style :: struct {
+	name: string,
+    colors: struct {
+		bg_app            : v4,
+        bg_surface        : v4,
+        bg_surface_raised : v4,
+        bg_overlay        : v4,
+
+        text_primary      : v4,
+        text_secondary    : v4,
+        text_disabled     : v4,
+        text_on_accent    : v4,
+
+        accent            : v4,
+        accent_hover      : v4,
+        accent_pressed    : v4,
+        accent_disabled   : v4,
+
+        button_bg         : v4,
+        button_bg_hover   : v4,
+        button_bg_pressed : v4,
+        button_fg         : v4,
+
+        input_bg          : v4,
+        input_border      : v4,
+        input_border_focus: v4,
+        input_selection   : v4,
+        input_placeholder : v4,
+
+        border            : v4,
+        divider           : v4,
+
+        scrollbar         : v4,
+        scrollbar_track   : v4,
+
+        success           : v4,
+        warning           : v4,
+        error             : v4,
+        info              : v4,
+
+        surface_disabled  : v4,
+    },
+	metrics: struct {
+		button_radius   : int,
+        input_radius    : int,
+        card_radius     : int,
+        tooltip_radius  : int,
+        dialog_radius   : int,
+        border_width    : int,
+        focus_ring_width: int,
+        spacing_xs      : int,
+        spacing_sm      : int,
+        spacing_md      : int,
+        spacing_lg      : int,
+        spacing_xl      : int,
+        font_size_sm    : int,
+        font_size_md    : int,
+        font_size_lg    : int,
+        font_size_xl    : int,
+
+		fonth : int,
+    },
+}
+
+theme_dark: Style = .{
+    name = "Dark",
+    colors = .{
+        bg_app            = #run RGB( 18,  18,  18),
+        bg_surface        = #run RGB( 30,  30,  30),
+        bg_surface_raised = #run RGB( 40,  40,  40),
+        bg_overlay        = #run RGBA(0, 0, 0, 160),
+
+        text_primary      = #run RGB(236, 236, 236),
+        text_secondary    = #run RGB(170, 170, 170),
+        text_disabled     = #run RGB(100, 100, 100),
+        text_on_accent    = #run RGB(255, 255, 255),
+
+        accent            = #run RGB( 99, 149, 255),  // Blue
+        accent_hover      = #run RGB(120, 166, 255),
+        accent_pressed    = #run RGB( 70, 120, 220),
+        accent_disabled   = #run RGB( 60,  80, 130),
+
+        button_bg         = #run RGB( 99, 149, 255),
+        button_bg_hover   = #run RGB(120, 166, 255),
+        button_bg_pressed = #run RGB( 70, 120, 220),
+        button_fg         = #run RGB(255, 255, 255),
+
+        input_bg          = #run RGB( 40,  40,  40),
+        input_border      = #run RGB( 80,  80,  80),
+        input_border_focus= #run RGB( 99, 149, 255),
+        input_selection   = #run RGBA(99, 149, 255, 80),
+        input_placeholder = #run RGB(100, 100, 100),
+
+        border            = #run RGB( 60,  60,  60),
+        divider           = #run RGB( 50,  50,  50),
+
+        scrollbar         = #run RGB( 80,  80,  80),
+        scrollbar_track   = #run RGB( 30,  30,  30),
+
+        success           = #run RGB( 72, 199, 142),
+        warning           = #run RGB(255, 182,  72),
+        error             = #run RGB(255,  85,  85),
+        info              = #run RGB( 99, 149, 255),
+
+        surface_disabled  = #run RGB( 50,  50,  50),
+    },
+    metrics = .{
+        button_radius   = 6,
+        input_radius    = 6,
+        card_radius     = 10,
+        tooltip_radius  = 4,
+        dialog_radius   = 12,
+        border_width    = 1,
+        focus_ring_width= 2,
+        spacing_xs      =  4,
+        spacing_sm      =  8,
+        spacing_md      = 16,
+        spacing_lg      = 24,
+        spacing_xl      = 32,
+        font_size_sm    = 12,
+        font_size_md    = 14,
+        font_size_lg    = 18,
+        font_size_xl    = 24,
+		fonth           = 20,
+    },
+};
+
+theme_light: Style = .{
+    name = "Light",
+    colors = .{
+        bg_app            = #run RGB(245, 245, 247),
+        bg_surface        = #run RGB(255, 255, 255),
+        bg_surface_raised = #run RGB(255, 255, 255),
+        bg_overlay        = #run RGBA(0, 0, 0, 80),
+        text_primary      = #run RGB( 20,  20,  20),
+        text_secondary    = #run RGB( 90,  90,  90),
+        text_disabled     = #run RGB(160, 160, 160),
+        text_on_accent    = #run RGB(255, 255, 255),
+        accent            = #run RGB( 37, 99, 235),
+        accent_hover      = #run RGB( 59,118, 255),
+        accent_pressed    = #run RGB( 20, 70, 180),
+        button_bg         = #run RGB( 37,  99, 235),
+        button_bg_hover   = #run RGB( 59, 118, 255),
+        button_bg_pressed = #run RGB( 20,  70, 180),
+        button_fg         = #run RGB(255, 255, 255),
+        input_bg          = #run RGB(255, 255, 255),
+        input_border      = #run RGB(200, 200, 210),
+        input_border_focus= #run RGB( 37,  99, 235),
+        input_selection   = #run RGBA(37, 99, 235, 60),
+        input_placeholder = #run RGB(160, 160, 170),
+        border            = #run RGB(220, 220, 225),
+        divider           = #run RGB(230, 230, 235),
+        scrollbar         = #run RGB(180, 180, 190),
+        scrollbar_track   = #run RGB(245, 245, 247),
+        success           = #run RGB( 22, 163, 74),
+        warning           = #run RGB(202, 138,  4),
+        error             = #run RGB(220,  38,  38),
+        info              = #run RGB( 37,  99, 235),
+        surface_disabled  = #run RGB(235, 235, 240),
+    },
+    metrics = .{
+        button_radius   = 6,
+        input_radius    = 6,
+        card_radius     = 10,
+        tooltip_radius  = 4,
+        dialog_radius   = 12,
+        border_width    = 1,
+        focus_ring_width= 2,
+        spacing_xs      =  4,
+        spacing_sm      =  8,
+        spacing_md      = 16,
+        spacing_lg      = 24,
+        spacing_xl      = 32,
+        font_size_sm    = 12,
+        font_size_md    = 14,
+        font_size_lg    = 18,
+        font_size_xl    = 24,
+		fonth           = 20,
+    },
+};
+
+
+screen_width: int;
+screen_height: int;
+#private
+f: *Font;
+phy_width: int;
+phy_height: int;
+

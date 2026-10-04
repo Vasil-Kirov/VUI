@@ -1,0 +1,111 @@
+module ui;
+
+CheckboxSize :: enum: int {
+	Small = 8,
+	Medium = 16,
+	Large = 24,
+	XL = 32,
+}
+
+Checkbox :: struct {
+	w: Widget,
+	label: string,
+	checked: bool,
+	check_anim: f32,
+}
+
+checkbox_paint :: fn(w: *Widget) {
+	check := cast(*Checkbox, w);
+
+	r := w.bounds_abs;
+	s := get_style(w);
+
+	box_h := s.metrics.fonth;
+	box := Bounds {
+		pos = .{ r.pos[0], r.pos[1] + (r.size[1] - box_h) / 2 },
+		size = .{box_h, box_h},
+	};
+
+	focused := widget_has_flag(w, .Focused);
+	hovered := widget_has_flag(w, .Hovered);
+	disabled := !widget_has_flag(w, .Enabled);
+
+	box_bg: v4;
+	if check.checked {
+		if disabled box_bg = s.colors.accent_disabled;
+		else if hovered box_bg = s.colors.accent_hover;
+		else box_bg = s.colors.accent;
+	} else {
+		box_bg = if disabled then s.colors.surface_disabled else s.colors.input_bg;
+	}
+	border := s.colors.input_border;
+	border_width := s.metrics.border_width;
+	draw_bordered_rndbox(box, box_bg, border, 0.0, 4, 4, border_width);
+	
+	if check.check_anim > 0 {
+		check_color := s.colors.text_on_accent;
+		check_color[3] = check.check_anim;
+
+		x1 := box.pos[0] + cast(int, box.size[0] as f32 * 2.0/9.0);
+		y1 := box.pos[1] + cast(int, box.size[1] as f32 * 5.0/9.0);
+		xm := box.pos[0] + cast(int, box.size[0] as f32 * 4.0/9.0);
+		ym := box.pos[1] + cast(int, box.size[1] as f32 * 7.0/9.0);
+		x2 := box.pos[0] + cast(int, box.size[0] as f32 * 7.0/9.0);
+		y2 := box.pos[1] + cast(int, box.size[1] as f32 * 2.0/9.0);
+
+		//for t := -1; t <= 1; ++t {
+			//enqueue_line_command(.{x1+t, y1+t}, .{xm+t, ym}, 2);
+			//enqueue_line_command(.{xm+t, ym},   .{x2+t, y2}, 2);
+		//}
+		enqueue_line_command(.{x1, y1}, .{xm, ym}, 2, check_color);
+		enqueue_line_command(.{xm, ym}, .{x2, y2}, 2, check_color);
+	}
+
+	text_color := if disabled then s.colors.text_disabled else s.colors.text_primary;
+	pos := r.pos + .{box_h + 8, 0};
+	enqueue_draw_text(check.label, pos, false, text_color, s.metrics.fonth);
+}
+
+checkbox_measure :: fn(w: *Widget, int, int) {
+	check := cast(*Checkbox, w);
+	s := get_style(w);
+	box_size := s.metrics.fonth as int;
+	label_size := measure_text_px(check.label, s.metrics.fonth);
+	w.content_size = .{label_size[0]+box_size+8, max(label_size[1], box_size)};
+}
+
+checkbox_on_event :: fn(w: *Widget, e: *WidgetEvent) {
+	check := cast(*Checkbox, w);
+	switch e.tag {
+		case .MouseClick: 
+		{
+			if !widget_has_flag(w, .Enabled)
+				return;
+
+			if check.checked
+				tween_f32(w, &check.check_anim, 0.0, 120, .OutCubic);
+			else
+				tween_f32(w, &check.check_anim, 1.0, 120, .OutCubic);
+
+			check.checked = !check.checked;
+		}
+	};
+}
+
+checkbox_identify: fn() -> string : () -> "checkbox";
+
+checkbox_vtable := WidgetVTable {
+	measure  = checkbox_measure,
+	arrange  = null,
+	paint    = checkbox_paint,
+	on_event = checkbox_on_event,
+	identify = checkbox_identify,
+};
+
+make_checkbox :: fn(label: string) -> *Widget {
+	check := make_widget(Checkbox, &checkbox_vtable);
+	check.label = label;
+
+	return &check.w;
+}
+

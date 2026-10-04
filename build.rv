@@ -1,0 +1,26 @@
+module build;
+
+_ :: #import compile;
+
+
+#run {
+	info: CompileInfo = .{
+		source_dirs = compile_mem([]string{"src"}),
+		files = compile_mem([]string{
+			"main.rv", "load_gl.rv", "input.rv", "math.rv", "text.rv",
+			"ui/ui_implement.rv",
+
+			"ui/ui.rv", "ui/anim.rv",
+			"ui/button.rv", "ui/panel.rv", "ui/label.rv", "ui/gap.rv", "ui/input.rv", "ui/checkbox.rv",
+			//"ui/window.rv", "ui/slider.rv",  
+			"renderer/renderer.rv",
+			//"vendor/SDL.rv",
+		}),
+		link = ".\\*.lib opengl32.lib",
+		output = "main.exe",
+		flags = .DebugInfo,
+	};
+	add_build_target("main", info);
+}
+
+

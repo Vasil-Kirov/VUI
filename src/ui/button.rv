@@ -1,0 +1,135 @@
+module ui;
+
+ButtonStyle :: enum {
+	Filled,
+	Outlined,
+	JustText,
+}
+
+Button :: struct {
+	w: Widget,
+	label: string,
+	on_click: ?*fn(*Button),
+	data: ?*void,
+	anim_t: f32,
+	style: ButtonStyle,
+}
+
+button_paint :: fn(w: *Widget) {
+	btn := cast(*Button, w);
+
+	push_clip(w.bounds_abs);
+	defer pop_clip();
+
+	s := get_style(w);
+	hovered := widget_has_flag(w, .Hovered);
+	pressed := widget_has_flag(w, .Pressed);
+	disabled := !widget_has_flag(w, .Enabled);
+	focused := widget_has_flag(w, .Focused);
+
+	bg: v4;
+	fg: v4;
+	border: v4;
+	if disabled {
+		bg = s.colors.surface_disabled;
+		fg = s.colors.text_disabled;
+		border = s.colors.button_bg;
+	} else if pressed {
+		bg = s.colors.button_bg_pressed;
+		fg = s.colors.button_fg;
+		border = s.colors.accent;
+	} else if hovered {
+		bg = color_lerp(s.colors.button_bg_hover, s.colors.button_bg, btn.anim_t);
+		fg = s.colors.button_fg;
+		border = s.colors.accent;
+	} else {
+		bg = color_lerp(s.colors.button_bg, s.colors.button_bg_hover, 1-btn.anim_t);
+		fg = s.colors.button_fg;
+		border = s.colors.button_bg;
+	}
+	radius := s.metrics.button_radius;
+
+	pos := w.bounds_abs.pos;
+	sz := w.bounds_abs.size;
+	
+	switch btn.style {
+		case .Filled: {
+			draw_bordered_rndbox(w.bounds_abs, bg, border, 1.0, radius, radius, s.metrics.border_width);
+		}
+		case .Outlined: {
+			#assert false; // @TODO: not yet implemented
+		}
+		case .JustText: {
+			if hovered || pressed {
+				fill := v4 { bg[0], bg[1], bg[2], 20.0/255.0 };
+				bfill := border;
+				bfill[3] = 20/255.0;
+				draw_bordered_rndbox(w.bounds_abs, fill, bfill, 1.0, radius, radius, s.metrics.border_width);
+			}
+		}
+	};
+	enqueue_draw_text(btn.label, pos + sz / iv2{2, 2}, true, fg);
+
+	//tsz := measure_text_px(btn.label);
+	//tszs := px_size_to_screen_phy(tsz);
+	//draw_bordered_rndbox(pos+sz*v2{0.5},szs,sz,.{0.25, 0.25 ,0.25, 0.25},.{1, 1, 1, 1});
+}
+
+button_measure :: fn(w: *Widget, int, int) {
+	btn := cast(*Button, w);
+
+	size := measure_text_px(btn.label);
+	size[0] = max(size[0], 80);
+	size[1] = max(size[1], 24);
+	w.content_size = .{size[0] as int, size[1] as int};
+}
+
+button_on_event :: fn(w: *Widget, e: *WidgetEvent) {
+	b := cast(*Button, w);
+	switch e.tag {
+		case .MouseEnter: {
+			tween_f32(w, &b.anim_t, 1.0, 120, .OutCubic);
+		}
+		case .MouseLeave: {
+			tween_f32(w, &b.anim_t, 0.0, 120, .OutCubic);
+		}
+		case .MouseClick: {
+			if widget_has_flag(w, .Enabled) {
+				f := b.on_click;
+				if f {
+					f(b);
+				}
+			}
+		}
+	};
+}
+
+button_set_style :: fn(w: *Widget, style: ButtonStyle) -> *Widget {
+	b := cast(*Button, w);
+	b.style = style;
+	return w;
+}
+
+button_on_click :: fn(w: *Widget, handler: *fn(*Button), data: ?*void) -> *Widget {
+	b := cast(*Button, w);
+	b.data = data;
+	b.on_click = handler;
+	return w;
+}
+
+button_identify: fn() -> string : () -> "button";
+
+button_vtable: WidgetVTable = .{
+	measure  = button_measure,
+	arrange  = null,
+	paint    = button_paint,
+	on_event = button_on_event,
+	identify = button_identify,
+};
+
+make_button :: fn(label: string) -> *Widget {
+	button := make_widget(Button, &button_vtable);
+	button.label = label;
+	return &button.w;
+}
+

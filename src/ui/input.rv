@@ -1,0 +1,312 @@
+module ui;
+
+
+INPUT_TEXT_MAX :: 4096;
+
+Input :: struct {
+	w: Widget,
+
+	text_buf: [INPUT_TEXT_MAX]u8,
+	text_len: int,
+	cursor: int,
+	sel_start: int,
+	sel_end: int,
+
+	scroll: int,
+	max_chars: int,
+
+	carret_start_ms: u64,
+
+	font_h: int,
+
+	placeholder: string,
+}
+
+input_paint :: fn(w: *Widget) {
+	input := cast(*Input, w);
+	s := get_style(w);
+	r := w.bounds_abs;
+	radius := s.metrics.input_radius;
+	focused := widget_has_flag(w, .Focused);
+	border_color := s.colors.input_border;
+	border_width := s.metrics.border_width;
+	if focused {
+		border_color = s.colors.input_border_focus;
+		border_width++;
+	}
+	draw_bordered_rndbox(w.bounds_abs, s.colors.input_bg, border_color, 0.0, radius, radius, border_width);
+	content := get_content_rect(w);
+	push_clip(content);
+	defer pop_clip();
+
+	if input.text_len == 0 {
+		if input.placeholder
+			enqueue_draw_text(input.placeholder, content.pos, false, s.colors.input_placeholder, input.font_h);
+		return;
+	}
+
+	before_cursor: [INPUT_TEXT_MAX]u8;
+	memcpy(&before_cursor[0], &input.text_buf[0], input.cursor);
+	before_cursor[input.cursor] = 0;
+
+	before_pxsz := measure_text_px(before_cursor[:input.cursor] as string, input.font_h);
+
+	cursor_px := before_pxsz[0];
+
+	visible := content.size[0];
+	if cursor_px - input.scroll > visible - 4 {
+		input.scroll = cursor_px - visible + 4;
+	}
+	if cursor_px - input.scroll < 0 {
+		input.scroll = max(0, cursor_px-4);
+	}
+
+	style := s;
+	if focused && input.sel_start >= 0 && input.sel_start != input.sel_end {
+		s := min(input.sel_start, input.sel_end);
+		e := max(input.sel_start, input.sel_end);
+		sbuf: [INPUT_TEXT_MAX]u8;
+		ebuf: [INPUT_TEXT_MAX]u8;
+		memcpy(&sbuf[0], &input.text_buf[0], s);
+		memcpy(&ebuf[0], &input.text_buf[0], e);
+		sbuf[s] = 0;
+		ebuf[e] = 0;
+		spx := 0;
+		epx := 0;
+		if s > 0 spx = measure_text_px(sbuf[:s] as string, input.font_h)[0];
+		if e > 0 epx = measure_text_px(ebuf[:e] as string, input.font_h)[0];
+
+		rect := Bounds {
+			pos = .{content.pos[0] + spx - input.scroll, content.pos[1]},
+			size = .{epx - spx, content.size[1]},
+		};
+		enqueue_box_command(rect, style.colors.input_selection);
+	}
+
+	if input.text_len > 0 {
+		text := input.text_buf[:input.text_len] as string;
+		pos := iv2 {
+			content.pos[0] - input.scroll,
+			content.pos[1]
+		};
+		enqueue_draw_text(text, pos, false, s.colors.text_primary, input.font_h);
+	}
+
+	if focused && (get_ms() - input.carret_start_ms) % 1600 < 800 {
+		bounds := Bounds {
+			pos = .{
+				content.pos[0] + cursor_px - input.scroll,
+				content.pos[1] + content.size[1] - input.font_h,
+			},
+			size = .{
+				2, input.font_h
+			}
+		};
+		enqueue_box_command(bounds, s.colors.accent);
+	}
+}
+
+input_measure :: fn(w: *Widget, availw: int, int) {
+	input := cast(*Input, w);
+	text := input.text_buf[:input.text_len] as string;
+	w.content_size = .{availw, input.font_h};
+}
+
+delete_selection :: fn(input: *Input) {
+	if input.sel_start >= 0 {
+		s := min(input.sel_start, input.sel_end);
+		e := max(input.sel_start, input.sel_end);
+		memmove(&input.text_buf[s], &input.text_buf[e], input.text_len - e + 1);
+		input.text_len -= e-s;
+		input.cursor = s;
+		input.sel_start = -1;
+	}
+}
+
+input_insert :: fn(input: *Input, text: string) {
+	if len(text) == 0
+		return;
+
+	text := text;
+
+	if input.sel_start >= 0 {
+		delete_selection(input);
+	}
+
+	if input.text_len+len(text) > input.max_chars
+		return;
+	if input.text_len+len(text) > INPUT_TEXT_MAX - 1
+		return;
+
+	memmove(
+		&input.text_buf[input.cursor+len(text)],
+		&input.text_buf[input.cursor],
+		input.text_len - input.cursor + 1
+	);
+	memcpy(&input.text_buf[input.cursor], &text[0], len(text));
+	input.text_len += len(text);
+	input.cursor += len(text);
+}
+
+input_delete :: fn(input: *Input, ctrl: bool) {
+	if input.sel_start >= 0 {
+		delete_selection(input);
+		return;
+	}
+
+	if input.cursor == 0
+		return;
+
+	start := input.cursor-1;
+	if ctrl {
+		for start > 0 {
+			if input.text_buf[start] != ' ' break;
+			start--;
+		}
+		for start > 0 {
+			if input.text_buf[start] == ' ' {
+				start++;
+				break;
+			}
+			start--;
+		}
+	}
+
+	memmove(&input.text_buf[start], &input.text_buf[input.cursor], input.text_len - input.cursor + 1);
+	input.text_len -= input.cursor - start;
+	input.cursor = start;
+}
+
+input_on_event :: fn(w: *Widget, e: *WidgetEvent) {
+	input := cast(*Input, w);
+	switch e.tag {
+		case .GainFocus: {
+			start_text_input();
+			input.carret_start_ms = get_ms();
+		}
+		case .TextInput: {
+			if widget_has_flag(w, .Enabled) {
+				input.carret_start_ms = get_ms(); // reset to stay on
+				e.bubbles = false;
+				input_insert(input, e.u.text.written);
+			}
+		}
+		case .KeyDown: {
+			ctrl := e.u.key.ctrl_down;
+			shift := e.u.key.shift_down;
+			key := e.u.key.key;
+			switch key {
+				case .Backspace: {
+					input_delete(input, ctrl);
+				}
+				case .Enter: {
+					e := WidgetEvent { tag = .Submit };
+					fire_event(w, e);
+				}
+				case .LeftArrow: {
+					input.carret_start_ms = get_ms(); // reset to stay on
+					from := input.cursor;
+					if ctrl {
+						for input.cursor > 0 && input.text_buf[input.cursor-1] == ' '
+							input.cursor--;
+						for input.cursor > 0 && input.text_buf[input.cursor-1] != ' '
+							input.cursor--;
+					} else {
+						if input.cursor > 0
+							input.cursor--;
+					}
+					if !shift
+						input.sel_start = -1;
+					else if from > 0 {
+						if input.sel_start < 0 {
+							input.sel_end = from;
+						}
+						input.sel_start = input.cursor;
+					}
+				}
+				case .RightArrow: {
+					input.carret_start_ms = get_ms(); // reset to stay on
+					from := input.cursor;
+					if ctrl {
+						for input.cursor < input.text_len && input.text_buf[input.cursor] == ' '
+							input.cursor++;
+						for input.cursor < input.text_len && input.text_buf[input.cursor] != ' '
+							input.cursor++;
+					} else {
+						if input.cursor < input.text_len
+							input.cursor++;
+					}
+					if !shift
+						input.sel_start = -1;
+					else if from < input.text_len {
+						if input.sel_start < 0 {
+							input.sel_end = from;
+						}
+						input.sel_start = input.cursor;
+					}
+				}
+			};
+		}
+	};
+}
+
+input_identify: fn() -> string : () -> "button";
+
+input_vtable: WidgetVTable = .{
+	measure  = input_measure,
+	arrange  = null,
+	paint    = input_paint,
+	on_event = input_on_event,
+	identify = input_identify,
+};
+
+input_default_w: int = 240;
+set_default_input_width :: fn() {
+}
+
+make_input :: fn(placeholder: string = "") -> *Widget {
+	input := make_widget(Input, &input_vtable);
+	input.w.flags |= .Focusable;
+	input.w.padding = .{2, 2, 2, 2};
+	input.w.desired_w = input_default_w;
+	input.placeholder = placeholder;
+	input.font_h = 20;
+	input.sel_start = -1;
+	input.sel_end = 0;
+	input.max_chars = 32;
+
+	/*
+	register_on_mouse_down(this -> {
+		input := cast(*Input, this);
+		if !input.hovered {
+			if input.active {
+				release_focus();
+			}
+			return;
+		}
+
+		input.active = true;
+		focus_input(
+			(this, text) -> {
+				text := text;
+				input := cast(*Input, this);
+				text_len := len(text);
+				if text_len > INPUT_TEXT_MAX
+					text_len = INPUT_TEXT_MAX;
+				if text_len > 0
+					memcpy(&input.text_buf[0], &text[0], INPUT_TEXT_MAX);
+				input.text_len = text_len;
+			},
+			(this) -> {
+				input := cast(*Input, this);
+				input.hovered = false;
+				input.active = false;
+			},
+			this
+		);
+	}, &input.w);
+	*/
+
+	return &input.w;
+}
+

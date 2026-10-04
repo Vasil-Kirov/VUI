@@ -1,0 +1,40 @@
+module ui;
+
+Label :: struct {
+	w: Widget,
+	text: string,
+}
+
+label_measure :: fn(w: *Widget, int, int) {
+	lbl := cast(*Label, w);
+
+	size := measure_text_px(lbl.text);
+	w.content_size = .{size[0] as int, size[1] as int};
+}
+
+label_paint :: fn(w: *Widget) {
+	lbl := cast(*Label, w);
+	bounds := w.bounds_abs;
+	s := get_style(w);
+	enqueue_draw_text(lbl.text, bounds.pos, false, s.colors.text_primary, s.metrics.font_size_lg);
+}
+
+
+label_identify: fn() -> string : () -> "label";
+label_vtable: WidgetVTable = .{
+	measure = label_measure,
+	paint   = label_paint,
+	identify = label_identify,
+};
+
+make_label :: fn(text: string) -> *Widget {
+	lbl := make_widget(Label, &label_vtable);
+	lbl.text = text;
+	return &lbl.w;
+}
+
+
+
+
+
+

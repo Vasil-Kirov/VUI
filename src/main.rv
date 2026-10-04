@@ -1,0 +1,201 @@
+module main;
+
+ttf :: #import "vendor/SDL_ttf.rv";
+_ :: #import renderer;
+_ :: #import SDL;
+_ :: #import misc;
+_ :: #import ui;
+_ :: #import text;
+#import gl;
+#import input;
+
+
+BUTTON_SIZE :: v2 {100, 40};
+CARD_SIZE :: v2{360, 624};
+INPUT_SIZE :: v2{250, 43};
+
+main :: fn() -> i32 {
+
+	if !Init(INIT_VIDEO | INIT_EVENTS) { 
+		println("sdl.Init() failed: %s", GetError());
+		return 1;
+	}
+
+	GL_SetAttribute(.GL_CONTEXT_MAJOR_VERSION, 4);
+	GL_SetAttribute(.GL_CONTEXT_MINOR_VERSION, 1);
+	GL_SetAttribute(.GL_CONTEXT_PROFILE_MASK, GL_CONTEXT_PROFILE_CORE as i32);
+
+	window := CreateWindow(c"UI Builder", 1600, 900, WINDOW_OPENGL);
+	if !window {
+		println("CreateWindow() failed: %s", GetError());
+		return 1;
+	}
+
+	glctx := GL_CreateContext(window);
+	if !glctx {
+		println("GL_CreateContext() failed: %s", GetError());
+		return 1;
+	}
+
+	if !gl.load() {
+		println("gl.load() failed.");
+		return 1;
+	}
+
+	GL_SetSwapInterval(1);
+
+	if !ttf.Init() {
+		println("ttf.Init() failed: %s", GetError());
+		return 1;
+	}
+	font := ttf.OpenFont(c"C:\\Windows\\Fonts\\arial.ttf",20.0);
+	if !font {
+		println("ttf.OpenFont() failed: %s", GetError());
+		return 1;
+	}
+	defer ttf.CloseFont(font);
+	init_ui();
+
+	config_window_size(font, 1600, 900, 1600, 900);
+
+	renderer, ok := make_renderer(1600, 900);
+	if !ok {
+		println("make_renderer() failed!");
+		return 1;
+	}
+
+	make_text_engine();
+
+	main_panel := panel_col();
+
+	card := panel_col(true);
+	panel_set_gap(card, 12);
+	panel_set_alignment(card, .Start);
+
+	okbtn := make_button("OK");
+	okbtn.self_align = .Center;
+
+	add_child_widget(card, make_checkbox("Check me :)"));
+	add_child_widget(card, make_checkbox("Oof"));
+	add_child_widget(card, make_label("Enter your name:"));
+	add_child_widget(card, make_input("Name"));
+	add_child_widget(card, make_label("Enter the room code:"));
+	add_child_widget(card, make_input("Code"));
+	add_child_widget(card, okbtn);
+
+	add_child_widget(main_panel, card);
+
+	/*
+	test_slider := make_slider(COLOR_TEAL);
+	add_child_widget(config_fbox, quickboxh(.{
+		make_label("Test: "),
+		test_slider
+	}, .{460, 96}));
+
+	window_config(config_window, .{}, 10, 10, true, "Config");
+	add_floating_window(config_window);
+
+	main_window, fbox := make_window(.{}, .{1600, 900}, COLOR_BACKGROUND, .Center);
+	btn := make_button("Hello", btn -> { println("Hello"); }, null, COLOR_TEAL, COLOR_BORDER, false, BUTTON_SIZE);
+
+	add_child_widget(fbox, btn);
+	*/
+	set_top_widget(main_panel);
+
+
+	input.wnd = window;
+	running := true;
+	for running {
+		e: Event;
+		for PollEvent(&e) {
+			switch cast(EventType, e.type) {
+				case .QUIT: {
+					running = false;
+				}
+			};
+			input.handle_sdl_event(e);
+		}
+
+		cmds := ui_update();
+
+		gl.ClearColor(0, 0.5, 0.15, 1);
+		gl.Clear(gl.COLOR_BUFFER_BIT);
+		
+		for cmd in cmds {
+			switch cmd.tag {
+				case .ClipRect: {
+					b := cmd.clip.bounds;
+					b.pos[1] = ui.screen_height - (b.pos[1] + b.size[1]);
+					gl.Scissor(
+						b.pos[0]  as i32,
+						b.pos[1]  as i32,
+						b.size[0] as u32,
+						b.size[1] as u32
+					);
+				}
+				case .DrawBox: {
+					set_shader(&renderer, .Box);
+
+					box := cmd.box;
+					bounds := box.bound;
+					set_shader(&renderer, .Box);
+					set_uniform(renderer.shader, "Color", box.color);
+					set_uniform(renderer.shader, "BoxSize", iv2_to_v2(bounds.size));
+					set_uniform(renderer.shader, "TopRound", box.top_radius as f32);
+					set_uniform(renderer.shader, "BotRound", box.bot_radius as f32);
+					set_uniform(renderer.shader, "DarkenT", box.darken_eff);
+					pos := px_size_to_screen(bounds.pos);
+					size := px_size_to_screen(bounds.size);
+					pos[1] = MAX_Y - (pos[1] + size[1]);
+					draw_quad(&renderer, renderer.white, pos, size, .{}, .{1, 1});
+				}
+				case .DrawTexture: {
+				}
+				case .DrawText: {
+					set_shader(&renderer, .Box);
+
+					txt := cmd.text;
+					pos := px_size_to_screen(txt.pos);
+					sz := ui.measure_text(txt.text, ttf.GetFontHeight(font));
+					if txt.centered {
+						pos -= sz/.{2, 2};
+					}
+					pos[1] = MAX_Y - (pos[1] + sz[1]);
+					draw_text(&renderer, font, txt.text, txt.col, pos);
+				}
+				case .DrawLine: {
+					line := cmd.line;
+
+					height := px_size_to_screen(.{1, line.to[1] - line.from[1]})[1];
+
+					from := px_size_to_screen(line.from);
+					to := px_size_to_screen(line.to);
+
+					//from[1] = MAX_Y - (from[1] + height);
+					//to[1] = MAX_Y - (to[1]  + height);
+					from[1] = MAX_Y - from[1];
+					to[1] = MAX_Y - to[1];
+
+
+					set_shader(&renderer, .Line);
+					set_uniform(renderer.shader, "Color", line.color);
+
+					gl.LineWidth(line.width_px as f32);
+					draw_line(&renderer, from, to);
+				}
+			};
+		}
+
+
+		GL_SwapWindow(window);
+		input.update_input();
+	}
+
+	GL_DestroyContext(glctx);
+	DestroyWindow(window);
+	Quit();
+
+	return 0;
+}
+
+

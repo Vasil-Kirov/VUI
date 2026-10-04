@@ -1,0 +1,123 @@
+module ui;
+
+Window :: struct {
+	w: Widget,
+	size: v2,
+	color: v4,
+	border: v4,
+	top_round: f32,
+	bot_round: f32,
+	floating: bool,
+	title: string,
+	title_hovered: bool,
+}
+
+
+window_draw :: fn(this: *Widget, pos: v2) {
+	wnd := cast(*Window, this);
+	sz := px_size_to_screen(wnd.size);
+	BORDER_R :: 0.01;
+	if wnd.top_round != 0 || wnd.bot_round != 0 {
+		if wnd.border[3] == 0 {
+			enqueue_rndbox_command(pos, sz, wnd.size, wnd.color, 0.0, wnd.top_round, wnd.bot_round);
+		} else {
+			thck := v2{BORDER_R, BORDER_R};
+			enqueue_rndbox_command(pos-thck, sz+thck*v2{2, 2}, wnd.size, wnd.border, 0.5, wnd.top_round, wnd.bot_round);
+			enqueue_rndbox_command(pos, sz, wnd.size, wnd.color, 0.5, wnd.top_round, wnd.bot_round);
+			if wnd.title {
+				textp := pos + .{sz[0]/2, sz[1]*0.975};
+				enqueue_draw_text(wnd.title, textp);
+			}
+		}
+	} else {
+		if wnd.border[3] == 0 {
+			enqueue_box_command(pos, sz, wnd.color);
+		} else {
+			thck := v2{BORDER_R, BORDER_R};
+			enqueue_box_command(pos-thck, sz+thck*v2{2, 2}, wnd.border);
+			enqueue_box_command(pos, sz, wnd.color);
+		}
+	}
+
+	child := this.children;
+	if child {
+		child.draw(child, pos);
+	}
+}
+
+window_resize :: fn(this: *Widget, sz: v2) {
+	if this.identify() != "window"
+		return;
+	wnd := cast(*Window, this);
+	wnd.size = sz;
+	child := wnd.w.children;
+	if child {
+		if child.identify() == "panel" {
+			fbox := cast(*Flexbox, child);
+			fbox.sz = sz;
+		} 
+	}
+}
+
+window_config :: fn(this: *Widget, px_sz: v2, top_round: f32, bot_round: f32, float: bool = false, title := "") {
+	if this.identify() != "window"
+		return;
+	wnd := cast(*Window, this);
+	if px_sz[0] != 0
+		window_resize(this, .{px_sz[0], wnd.size[1]});
+	if px_sz[1] != 0
+		window_resize(this, .{wnd.size[0], px_sz[1]});
+	wnd.top_round = top_round;
+	wnd.bot_round = bot_round;
+	wnd.floating = float;
+	wnd.title = title;
+}
+
+window_mousemove :: fn(w: *Widget, mouse: v2) {
+	defer default_on_mousemove(w, mouse);
+
+	wnd := cast(*Window, w);
+	if !wnd.floating
+		return;
+
+	if wnd.title_hovered && mouse_is_down() {
+		delta := get_mouse_delta();
+		wnd.w.pos += .{delta[0], -delta[1]};
+		return;
+	}
+
+	sz := px_size_to_screen(wnd.size);
+	if mouse[0] < 0 || mouse[0] > sz[0] {
+		wnd.title_hovered = false;
+		return;
+	}
+	if mouse[1] < sz[1] * 0.95 || mouse[1] > sz[1] {
+		wnd.title_hovered = false;
+		return;
+	}
+
+	wnd.title_hovered = true;
+}
+
+make_window :: fn(pos: v2, px_size: v2, background: v4, justify: Justify, border_color := v4{0, 0, 0, 0}) -> (*Widget, *Widget) {
+	window := make_widget(Window, window_draw, window_mousemove, this -> {
+		wnd := cast(*Window, this);
+		return wnd.size[0] as int, wnd.size[1] as int;
+	}, () -> "window");
+	window.w.pos = pos;
+	window.size = px_size;
+	window.color = background;
+	window.border = border_color;
+	window.floating = false;
+	window.title = "";
+	window.top_round = 0;
+	window.bot_round = 0;
+
+	fbox := make_flexbox(px_size, justify, .Vertical);
+	add_child_widget(&window.w, fbox);
+
+	widget := &window.w;
+	return widget, fbox;
+}
+
+

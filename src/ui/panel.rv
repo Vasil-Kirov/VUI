@@ -1,0 +1,238 @@
+module ui;
+
+Justify :: enum {
+	SpaceEvenly,
+	Center,
+	Start,
+}
+
+Direction :: enum {
+	Vertical,
+	Horizontal,
+}
+
+Align :: enum {
+	Default,
+	Center,
+	Start,
+}
+
+Panel :: struct {
+	w: Widget,
+	sz: v2,
+	justify: Justify,
+	dir: Direction,
+	align_items: Align,
+	gap: int,
+	is_card: bool,
+
+	//DEBUG: v4,
+}
+
+panel_measure :: fn(w: *Widget, availw: int, availh: int) #nocheck {
+	p := cast(*Panel, w);
+	is_row := p.dir == .Horizontal;
+
+	main_total := 0;
+	cross_max := 0;
+	gap_total := 0;
+	visible_count := 0;
+	child := p.w.children;
+	for child {
+		defer child = child.next;
+		if !widget_has_flag(child, .Visible)
+			continue;
+
+		visible_count++;
+		layout_measure(child, availw, availh);
+
+		child_outer_w := child.content_size[0] + child.padding.left + child.padding.right + child.margin.left + child.margin.right;
+		child_outer_h := child.content_size[1] + child.padding.top + child.padding.bot + child.margin.top + child.margin.bot;
+
+		if is_row {
+			main_total += child_outer_w;
+			cross_max = max(cross_max, child_outer_h);
+		} else {
+			main_total += child_outer_h;
+			cross_max = max(cross_max, child_outer_w);
+		}
+	}
+	
+	if visible_count > 1 gap_total = p.gap * (visible_count - 1);
+
+	if is_row {
+		w.content_size[0] = main_total + gap_total;
+		w.content_size[1] = cross_max;
+	} else {
+		w.content_size[0] = cross_max;
+		w.content_size[1] = main_total + gap_total;
+	}
+}
+
+panel_arrange :: fn(w: *Widget, Bounds) #nocheck {
+	p := cast(*Panel, w);
+	is_row := p.dir == .Horizontal;
+	content := get_content_rect(w);
+
+	visible_count := 0;
+	expand_count := 0;
+	fixed_main := 0;
+	child := p.w.children;
+	for child {
+		defer child = child.next;
+		if !widget_has_flag(child, .Visible)
+			continue;
+
+		visible_count++;
+		expands := if is_row then widget_has_flag(child, .ExpandW) else widget_has_flag(child, .ExpandH);
+
+		if expands {
+			expand_count++;
+		} else {
+			if is_row {
+				fixed_main += child.content_size[0] + child.padding.left + child.padding.right + child.margin.left + child.margin.right;
+			} else {
+				fixed_main += child.content_size[1] + child.padding.top + child.padding.bot + child.margin.top + child.margin.bot;
+			}
+		}
+	}
+
+	total_gap := if visible_count > 1 then p.gap * (visible_count - 1) else 0;
+	avail_main := (if is_row then content.size[0] else content.size[1]) as int - total_gap;
+
+	expand_each := 0;
+	if expand_count > 0
+		expand_each = max(0, (avail_main - fixed_main) / expand_count);
+
+	main_used := fixed_main + total_gap + expand_each * expand_count;
+	main_avail := (if is_row then content.size[0] else content.size[1]) as int;
+	main_free := main_avail - main_used;
+
+	start_pos := 0;
+	between_gap := 0;
+	switch p.justify {
+		case .Center: {
+			start_pos   = main_free / 2;
+			between_gap = 0;
+		}
+		case .Start: {
+			start_pos   = 0;
+			between_gap = 0;
+		}
+		case .SpaceEvenly: {
+			between_gap = if visible_count > 0 then main_free / (visible_count+1) else 0;
+			start_pos   = between_gap;
+		}
+		case _: { #assert false; }
+	};
+
+	cursor := (if is_row then content.pos[0] else content.pos[1]) as int + start_pos;
+	child = p.w.children;
+	for child {
+		defer child = child.next;
+		if !widget_has_flag(child, .Visible)
+			continue;
+
+
+		expands := if is_row then widget_has_flag(child, .ExpandW) else widget_has_flag(child, .ExpandH);
+		outer_main := 0;
+		if is_row {
+			outer_main = child.content_size[0] + child.padding.left + child.padding.right + child.margin.left + child.margin.right;
+		} else {
+			outer_main = child.content_size[1] + child.padding.top + child.padding.bot + child.margin.top + child.margin.bot;
+		}
+
+		if expands {
+			outer_main = expand_each;
+			if is_row {
+				outer_main += child.padding.left + child.padding.right + child.margin.left + child.margin.right;
+			} else {
+				outer_main += child.padding.top + child.padding.bot + child.margin.top + child.margin.bot;
+			}
+		}
+
+		cross_avail := (if is_row then content.size[1] else content.size[0]) as int;
+		outer_cross := 0;
+		if is_row {
+			outer_cross = child.content_size[1] + child.padding.top + child.padding.bot + child.margin.top + child.margin.bot;
+		} else {
+			outer_cross = child.content_size[0] + child.padding.left + child.padding.right + child.margin.left + child.margin.right;
+		}
+
+		cross_pos := 0;
+		align_items := p.align_items;
+		if child.self_align != .Default
+			align_items = child.self_align;
+		switch align_items {
+			case .Center: cross_pos = (if is_row then content.pos[1] else content.pos[0]) as int + (cross_avail - outer_cross) / 2;
+			case .Start: cross_pos = (if is_row then content.pos[1] else content.pos[0]);
+
+		};
+
+		child_bounds_abs: Bounds;
+		if is_row {
+			child_bounds_abs.pos[0]  = cursor    + child.margin.left;
+			child_bounds_abs.pos[1]  = cross_pos + child.margin.top;
+			child_bounds_abs.size[0] = outer_main  - child.margin.left - child.margin.right;
+			child_bounds_abs.size[1] = outer_cross - child.margin.top - child.margin.bot;
+		} else {
+			child_bounds_abs.pos[0] = cross_pos + child.margin.left;
+			child_bounds_abs.pos[1] = cursor    + child.margin.top;
+			child_bounds_abs.size[0] = outer_cross - child.margin.left - child.margin.right;
+			child_bounds_abs.size[1] = outer_main  - child.margin.top - child.margin.bot;
+		}
+
+		layout_arrange(child, child_bounds_abs);
+
+		cursor += outer_main + p.gap + between_gap;
+	}
+}
+
+panel_paint :: fn(w: *Widget) {
+	p := cast(*Panel, w);
+	s := get_style(w);
+	if p.is_card {
+		draw_bordered_rndbox(w.bounds_abs, s.colors.bg_surface, s.colors.border, 0.0, s.metrics.card_radius, s.metrics.card_radius, s.metrics.border_width);
+	} else {
+		enqueue_box_command(w.bounds_abs, s.colors.bg_app);
+	}
+}
+
+panel_set_alignment :: fn(w: *Widget, align: Align) {
+	if align == .Default
+		return;
+
+	p := cast(*Panel, w);
+	p.align_items = align;
+}
+
+panel_set_gap :: fn(w: *Widget, gap: int) {
+	p := cast(*Panel, w);
+	p.gap = gap;
+}
+
+//COLOR_FBOX :: []v4{v4{1, 0, 0, 0.25}, v4{0, 1, 0, 0.25}, v4{0, 0, 1, 0.25}, v4{0, 1, 1, 0.25}};
+//COUNTER := 0;
+
+panel_identify: fn() -> string : () -> "panel";
+panel_vtable: WidgetVTable = .{
+	measure = panel_measure,
+	arrange = panel_arrange,
+	paint   = panel_paint,
+	identify = panel_identify,
+};
+
+make_panel :: fn(dir: Direction, is_card := false) -> *Widget {
+	panel := make_widget(Panel, &panel_vtable);
+	panel.dir = dir;
+	panel.is_card = is_card;
+	panel.align_items = .Center;
+	if is_card {
+		panel.w.padding = .{8, 8, 8, 8};
+	}
+	return &panel.w;
+}
+
+panel_row : fn(is_card := false) -> *Widget : (is_card) -> make_panel(.Horizontal, is_card);
+panel_col : fn(is_card := false) -> *Widget : (is_card) -> make_panel(.Vertical, is_card);
+

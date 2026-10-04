@@ -1,0 +1,41 @@
+module text;
+
+_ :: #import misc;
+sdl :: #import SDL;
+ttf :: #import TTF;
+#import gl;
+#import ui;
+r :: #import renderer;
+
+text_texture: r.GPUTexture;
+text_engine: *ttf.TextEngine;
+text_font: *ttf.Font;
+text_surface: *sdl.Surface;
+
+
+make_text_engine :: fn() {
+	text_texture = gl.CreateTexture();
+	text_engine = ttf.CreateSurfaceTextEngine();
+	text_surface = sdl.CreateSurface(1600,900,.RGBA8888);
+}
+
+draw_text :: fn(rend: *r.Renderer, font: *ttf.Font, text: string, color: v4, pos: v2) #nocheck {
+	sz := ui.measure_text(text, ttf.GetFontHeight(font));
+	pxszi := ui.measure_text_px(text);
+	pxsz := v2 {pxszi[0] as f32, pxszi[1] as f32};
+	tsz := pxsz/v2{1600, 900};
+
+	texto := ttf.CreateText(text_engine, font, text.data, len(text) as i32);
+	sdl.ClearSurface(text_surface, 0, 0, 0, 0);
+	ttf.DrawSurfaceText(texto, 0, 0, text_surface);
+	sdl.FlipSurface(text_surface, .FLIP_VERTICAL);
+
+	r.upload_texture(text_surface.pixels, text_surface.w as u32, text_surface.h as u32, .Linear, text_texture);
+	r.set_shader(rend, .Box);
+	r.set_uniform(rend.shader, "Color", color);
+	r.set_uniform(rend.shader, "BoxSize", pxsz);
+	r.set_uniform(rend.shader, "TopRound", 0.0);
+	r.set_uniform(rend.shader, "BotRound", 0.0);
+	r.draw_quad(rend, text_texture, pos, sz, .{0, 1-tsz[1]}, .{tsz[0], 1});
+}
+

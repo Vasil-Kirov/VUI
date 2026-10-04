@@ -1,0 +1,30 @@
+module ui;
+
+Gap :: struct {
+	w: Widget,
+	space: int,
+}
+
+paint_gap :: fn(this: *Widget, pos: v2) {
+
+#if DEBUG_DRAW
+{
+	gap := cast(*Gap, this);
+	pxsz := v2{gap.space as f32, gap.space as f32};
+	sz := px_size_to_screen(pxsz);
+	draw_bordered_rndbox(pos, sz, pxsz, .{1, 0, 0, 1}, .{0, 0, 0, 1});
+}
+
+}
+gap_identify : fn() -> string : () -> "gap";
+gap_vtable: WidgetVTable = .{
+	identify = gap_identify,
+};
+
+make_gap :: fn(space: int) -> *Widget {
+	gap := make_widget(Gap, &gap_vtable);
+	gap.w.desired_w = space;
+	gap.w.desired_h = space;
+	return &gap.w;
+}
+

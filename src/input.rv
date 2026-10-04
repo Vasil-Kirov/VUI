@@ -1,0 +1,100 @@
+module input;
+
+_ :: #import misc;
+sdl :: #import SDL;
+#import ui;
+
+
+lmb_down := false;
+lmb_went_down := false;
+mouse_pos: v2;
+mouse_delta: v2 = .{};
+wnd: *sdl.Window;
+
+start_typing :: fn() {
+	sdl.StartTextInput(wnd);
+}
+
+stop_typing :: fn() {
+	sdl.StopTextInput(wnd);
+}
+
+convert_mouse :: fn(m: v2) -> v2 {
+	x: i32;
+	y: i32;
+	sdl.GetWindowSizeInPixels(wnd, &x, &y);
+
+	return .{m[0], y as f32 - m[1]};
+}
+
+handle_sdl_event :: fn(e: sdl.Event) {
+	switch cast(sdl.EventType, e.type) {
+		case .MOUSE_BUTTON_UP, .MOUSE_BUTTON_DOWN: {
+			x: f32; y: f32;
+			sdl.GetMouseState(&x, &y);
+			mouse_pos[0] = x;
+			mouse_pos[1] = y;
+
+			if e.button.button != 1 // lmb
+				yield;
+			if e.button.down {
+				lmb_went_down = true;
+				lmb_down = true;
+			} else {
+				lmb_down = false;
+			}
+			ui.handle_mouse_button(mouse_pos, e.button.button as int, e.type == sdl.EventType.MOUSE_BUTTON_DOWN);
+		}
+		case .MOUSE_MOTION: {
+			x: f32; y: f32;
+			sdl.GetMouseState(&x, &y);
+			mouse_pos[0] = x;
+			mouse_pos[1] = y;
+			mouse_delta[0] = e.motion.xrel;
+			mouse_delta[1] = e.motion.yrel;
+			ui.handle_mouse_move(mouse_pos, mouse_delta);
+		}
+		case .TEXT_INPUT: {
+			text := e.text.text;
+			if !text
+				yield;
+
+			i := 0;
+			for text[i] != 0 i++;
+
+			ui.handle_text_input(text[:i] as string);
+		}
+		case .TEXT_EDITING: {
+			//ui.keyboard_edit(e.edit.text, e.edit.start, e.edit.length);
+		}
+		case .KEY_UP, .KEY_DOWN: {
+			is_down := cast(sdl.EventType, e.type) == .KEY_DOWN;
+			mod := e.key.mod;
+			shift := (mod & sdl.KMOD_LSHIFT as u16) != 0;
+			ctrl := (mod  & sdl.KMOD_CTRL as u16) != 0;
+			key := e.key.key;
+			if key == sdl.K_BACKSPACE as u32 {
+				ui.handle_key_press(.Backspace, is_down, shift, ctrl);
+			} else if key == sdl.K_LEFT as u32 {
+				ui.handle_key_press(.LeftArrow, is_down, shift, ctrl);
+			} else if key == sdl.K_RIGHT as u32 {
+				ui.handle_key_press(.RightArrow, is_down, shift, ctrl);
+			} else if key == sdl.K_TAB as u32 {
+				ui.handle_key_press(.Tab, is_down, shift, ctrl);
+			} else if key == sdl.K_RETURN as u32 {
+				ui.handle_key_press(.Enter, is_down, shift, ctrl);
+			} else if key == sdl.K_ESCAPE as u32 {
+				ui.handle_key_press(.Esc, is_down, shift, ctrl);
+			}
+		}
+	};
+}
+
+mouse_went_down :: fn() -> bool { return lmb_went_down; }
+
+update_input :: fn() {
+	lmb_went_down = false;
+	mouse_delta = .{};
+}
+
+

@@ -1,0 +1,74 @@
+module ui;
+
+
+Slider :: struct {
+	w: Widget,
+	size: v2,
+	t: f32,
+	col: v4,
+	hovered: bool,
+	held: bool,
+}
+
+slider_draw :: fn(w: *Widget, pos: v2) {
+	sld := cast(*Slider, w);
+	sz := px_size_to_screen(sld.size);
+
+
+	enqueue_rndbox_command(pos, sz, sld.size, darken(sld.col), 1.0, 24, 24);
+	enqueue_rndbox_command(pos, sz * .{sld.t, 1}, sld.size * .{sld.t, 1}, sld.col, 0.5, 24, 24);
+
+
+	if mouse_went_down() && sld.hovered
+		sld.held = true;
+	if !mouse_is_down()
+		sld.held = false;
+}
+
+slider_mousemove :: fn(w: *Widget, mouse: v2) {
+	sld := cast(*Slider, w);
+
+	sz := px_size_to_screen(sld.size);
+	if mouse[0] < 0 {
+		if sld.held
+			sld.t = 0;
+		sld.hovered = false;
+		return;
+	}
+	if mouse[0] > sz[0] {
+		if sld.held
+			sld.t = 1;
+		sld.hovered = false;
+		return;
+	}
+	if sld.held {
+		mouse_delta := get_mouse_delta();
+		sld.t += mouse_delta[0] / sz[0];
+		if sld.t < 0 sld.t = 0;
+		if sld.t > 1 sld.t = 1;
+	}
+	if mouse[1] < 0 || mouse[1] > sz[1] {
+		sld.hovered = false;
+		return;
+	}
+
+	sld.hovered = true;
+}
+
+make_slider :: fn(col: v4, px_size: v2 = .{320, 48}) -> *Widget {
+	sld := make_widget(Slider, slider_draw, slider_mousemove, w -> {
+		sld := cast(*Slider, w);
+		return sld.size[0] as int, sld.size[1] as int;
+	}, () -> "slider");
+
+	#assert px_size[0] != 0;
+
+	sld.size = px_size;
+	sld.col = col;
+	sld.t = 0;
+	sld.hovered = false;
+	sld.held = false;
+	
+	return &sld.w;
+}
+
