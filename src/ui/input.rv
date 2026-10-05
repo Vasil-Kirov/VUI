@@ -184,6 +184,10 @@ input_on_event :: fn(w: *Widget, e: *WidgetEvent) {
 			start_text_input();
 			input.carret_start_ms = get_ms();
 		}
+		case .LoseFocus: {
+			stop_text_input();
+			input.sel_start = -1;
+		}
 		case .TextInput: {
 			if widget_has_flag(w, .Enabled) {
 				input.carret_start_ms = get_ms(); // reset to stay on
@@ -250,7 +254,7 @@ input_on_event :: fn(w: *Widget, e: *WidgetEvent) {
 	};
 }
 
-input_identify: fn() -> string : () -> "button";
+input_identify: fn() -> string : () -> "input";
 
 input_vtable: WidgetVTable = .{
 	measure  = input_measure,
@@ -261,13 +265,11 @@ input_vtable: WidgetVTable = .{
 };
 
 input_default_w: int = 240;
-set_default_input_width :: fn() {
-}
 
 make_input :: fn(placeholder: string = "") -> *Widget {
 	input := make_widget(Input, &input_vtable);
 	input.w.flags |= .Focusable;
-	input.w.padding = .{2, 2, 2, 2};
+	input.w.padding = .{6, 6, 6, 6};
 	input.w.desired_w = input_default_w;
 	input.placeholder = placeholder;
 	input.font_h = 20;

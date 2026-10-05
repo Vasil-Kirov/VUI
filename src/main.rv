@@ -68,9 +68,24 @@ main :: fn() -> i32 {
 
 	main_panel := panel_col();
 
+	submit_handler :: fn(p: *Panel) #nocheck {
+		child := p.w.children;
+		for child {
+			defer child = child.next;
+			if child.vtable.identify() == "input" {
+				i := cast(*Input, child);
+				if i.placeholder == "Name"
+					println("Name: %", i.text_buf[:i.text_len] as string);
+				else if i.placeholder == "Code"
+					println("Code: %", i.text_buf[:i.text_len] as string);
+			}
+		}
+	};
+
 	card := panel_col(true);
 	panel_set_gap(card, 12);
 	panel_set_alignment(card, .Start);
+	panel_set_submit_handler(card, submit_handler, null);
 
 	okbtn := make_button("OK");
 	okbtn.self_align = .Center;

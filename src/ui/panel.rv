@@ -26,6 +26,9 @@ Panel :: struct {
 	gap: int,
 	is_card: bool,
 
+	submit_handler: *fn(*Panel),
+	submit_data: ?*void,
+
 	//DEBUG: v4,
 }
 
@@ -211,6 +214,23 @@ panel_set_gap :: fn(w: *Widget, gap: int) {
 	p.gap = gap;
 }
 
+panel_set_submit_handler :: fn(w: *Widget, handler: ?*fn(*Panel), data: ?*void) {
+	p := cast(*Panel, w);
+	p.submit_data = data;
+	p.submit_handler = handler;
+}
+
+panel_on_event :: fn(w: *Widget, e: *WidgetEvent) {
+	p := cast(*Panel, w);
+	if e.tag == .Submit && widget_has_flag(w, .Enabled) {
+		submit := p.submit_handler;
+		if submit {
+			e.bubbles = false;
+			submit(p);
+		}
+	}
+}
+
 //COLOR_FBOX :: []v4{v4{1, 0, 0, 0.25}, v4{0, 1, 0, 0.25}, v4{0, 0, 1, 0.25}, v4{0, 1, 1, 0.25}};
 //COUNTER := 0;
 
@@ -219,6 +239,7 @@ panel_vtable: WidgetVTable = .{
 	measure = panel_measure,
 	arrange = panel_arrange,
 	paint   = panel_paint,
+	on_event = panel_on_event,
 	identify = panel_identify,
 };
 
