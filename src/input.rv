@@ -4,11 +4,7 @@ _ :: #import misc;
 sdl :: #import SDL;
 #import ui;
 
-
-lmb_down := false;
-lmb_went_down := false;
 mouse_pos: v2;
-mouse_delta: v2 = .{};
 wnd: *sdl.Window;
 
 start_typing :: fn() {
@@ -37,12 +33,7 @@ handle_sdl_event :: fn(e: sdl.Event) {
 
 			if e.button.button != 1 // lmb
 				yield;
-			if e.button.down {
-				lmb_went_down = true;
-				lmb_down = true;
-			} else {
-				lmb_down = false;
-			}
+
 			ui.handle_mouse_button(mouse_pos, e.button.button as int, e.type == sdl.EventType.MOUSE_BUTTON_DOWN);
 		}
 		case .MOUSE_MOTION: {
@@ -50,6 +41,7 @@ handle_sdl_event :: fn(e: sdl.Event) {
 			sdl.GetMouseState(&x, &y);
 			mouse_pos[0] = x;
 			mouse_pos[1] = y;
+			mouse_delta: v2;
 			mouse_delta[0] = e.motion.xrel;
 			mouse_delta[1] = e.motion.yrel;
 			ui.handle_mouse_move(mouse_pos, mouse_delta);
@@ -88,13 +80,6 @@ handle_sdl_event :: fn(e: sdl.Event) {
 			}
 		}
 	};
-}
-
-mouse_went_down :: fn() -> bool { return lmb_went_down; }
-
-update_input :: fn() {
-	lmb_went_down = false;
-	mouse_delta = .{};
 }
 
 

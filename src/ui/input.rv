@@ -227,6 +227,9 @@ input_on_event :: fn(w: *Widget, e: *WidgetEvent) {
 						}
 						input.sel_start = input.cursor;
 					}
+
+					if input.cursor == 0
+						input.scroll = 0;
 				}
 				case .RightArrow: {
 					input.carret_start_ms = get_ms(); // reset to stay on
@@ -276,38 +279,6 @@ make_input :: fn(placeholder: string = "") -> *Widget {
 	input.sel_start = -1;
 	input.sel_end = 0;
 	input.max_chars = 32;
-
-	/*
-	register_on_mouse_down(this -> {
-		input := cast(*Input, this);
-		if !input.hovered {
-			if input.active {
-				release_focus();
-			}
-			return;
-		}
-
-		input.active = true;
-		focus_input(
-			(this, text) -> {
-				text := text;
-				input := cast(*Input, this);
-				text_len := len(text);
-				if text_len > INPUT_TEXT_MAX
-					text_len = INPUT_TEXT_MAX;
-				if text_len > 0
-					memcpy(&input.text_buf[0], &text[0], INPUT_TEXT_MAX);
-				input.text_len = text_len;
-			},
-			(this) -> {
-				input := cast(*Input, this);
-				input.hovered = false;
-				input.active = false;
-			},
-			this
-		);
-	}, &input.w);
-	*/
 
 	return &input.w;
 }

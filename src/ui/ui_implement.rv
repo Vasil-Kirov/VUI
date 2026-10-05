@@ -44,24 +44,6 @@ measure_text_px :: fn(text: string, font_h: int = 20) -> iv2 {
 	return .{width as int, total_height as int};
 }
 
-mouse_is_down :: fn() -> bool {
-	return input.lmb_down;
-}
-
-mouse_went_down :: fn() -> bool {
-	return input.mouse_went_down();
-}
-
-FocusHandler :: struct {
-	write: ?*fn(*Widget, string),
-	close: ?*fn(*Widget),
-	w: ?*Widget,
-	buf: [1024]u8,
-	buf_used: int,
-}
-
-focus_handler: FocusHandler;
-
 start_text_input :: fn() {
 	input.start_typing();
 }
@@ -70,33 +52,12 @@ stop_text_input :: fn() {
 	input.stop_typing();
 }
 
-/*
-keyboard_edit :: fn(text: ?*u8, start: i32, length: i32) #nocheck {
-	if text == null || !focus_handler.write || start < 0 || length < 0
-		return;
-	if start + length > len(focus_handler.buf)
-		return;
-
-	for i := 0 as i32; i < length; ++i {
-		focus_handler.buf[i+start] = text[i];
-	}
-	text := focus_handler.buf[:focus_handler.buf_used] as string;
-	focus_handler.write(focus_handler.w, text);
-}
-*/
-
 get_ms :: fn() -> u64 {
 	return sdl.GetTicks();
 }
 
 MAX_X :: 10.0;
 MAX_Y :: 5.625;
-
-px_to_screen :: fn(pos: v2) -> v2 {
-	tx := pos[0] / screen_width as f32;
-	ty := (screen_height as f32 - pos[1]) / screen_height as f32;
-	return .{lerp(0, MAX_X, tx), lerp(0, MAX_Y, ty)};
-}
 
 px_size_to_screen_phy :: fn(size: v2) -> v2 {
 	return .{
@@ -105,18 +66,10 @@ px_size_to_screen_phy :: fn(size: v2) -> v2 {
 	};
 }
 
-
 px_size_to_screen :: fn(size: iv2) -> v2 {
 	return .{
 		(size[0] as f32 / screen_width  as f32) * MAX_X,
 		(size[1] as f32 / screen_height as f32) * MAX_Y,
-	};
-}
-
-screen_to_px :: fn(p: v2) -> v2 {
-	return .{
-		(p[0] / MAX_X) * screen_width as f32,
-		(p[1] / MAX_Y) * screen_height as f32
 	};
 }
 
