@@ -16,7 +16,9 @@ label_paint :: fn(w: *Widget) {
 	lbl := cast(*Label, w);
 	bounds := w.bounds_abs;
 	s := get_style(w);
-	enqueue_draw_text(lbl.text, bounds.pos, false, s.colors.text_primary, s.metrics.font_size_lg);
+	enqueue_draw_text(lbl.text, bounds.pos, false, s.colors.text_primary);
+
+	//enqueue_box_command(bounds, .{1, 1, 1, 0.5});
 }
 
 

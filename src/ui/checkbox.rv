@@ -20,7 +20,9 @@ checkbox_paint :: fn(w: *Widget) {
 	r := w.bounds_abs;
 	s := get_style(w);
 
-	box_h := s.metrics.fonth;
+	fonth := get_font_height(f);
+
+	box_h := fonth;
 	box := Bounds {
 		pos = .{ r.pos[0], r.pos[1] + (r.size[1] - box_h) / 2 },
 		size = .{box_h, box_h},
@@ -63,14 +65,14 @@ checkbox_paint :: fn(w: *Widget) {
 
 	text_color := if disabled then s.colors.text_disabled else s.colors.text_primary;
 	pos := r.pos + .{box_h + 8, 0};
-	enqueue_draw_text(check.label, pos, false, text_color, s.metrics.fonth);
+	enqueue_draw_text(check.label, pos, false, text_color);
 }
 
 checkbox_measure :: fn(w: *Widget, int, int) {
 	check := cast(*Checkbox, w);
 	s := get_style(w);
-	box_size := s.metrics.fonth as int;
-	label_size := measure_text_px(check.label, s.metrics.fonth);
+	box_size := get_font_height(f);
+	label_size := measure_text_px(check.label);
 	w.content_size = .{label_size[0]+box_size+8, max(label_size[1], box_size)};
 }
 

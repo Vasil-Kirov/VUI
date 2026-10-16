@@ -17,8 +17,6 @@ Input :: struct {
 
 	carret_start_ms: u64,
 
-	font_h: int,
-
 	placeholder: string,
 }
 
@@ -40,8 +38,12 @@ input_paint :: fn(w: *Widget) {
 	defer pop_clip();
 
 	if input.text_len == 0 {
-		if input.placeholder
-			enqueue_draw_text(input.placeholder, content.pos, false, s.colors.input_placeholder, input.font_h);
+		if input.placeholder {
+			enqueue_draw_text(input.placeholder, content.pos, false, s.colors.input_placeholder);
+
+			//sz := measure_text_px(input.placeholder, input.font_h);
+			//enqueue_box_command(.{content.pos, sz}, .{0.25, 0.25 ,0.25, 0.25});
+		}
 		return;
 	}
 
@@ -49,7 +51,7 @@ input_paint :: fn(w: *Widget) {
 	memcpy(&before_cursor[0], &input.text_buf[0], input.cursor);
 	before_cursor[input.cursor] = 0;
 
-	before_pxsz := measure_text_px(before_cursor[:input.cursor] as string, input.font_h);
+	before_pxsz := measure_text_px(before_cursor[:input.cursor] as string);
 
 	cursor_px := before_pxsz[0];
 
@@ -73,8 +75,8 @@ input_paint :: fn(w: *Widget) {
 		ebuf[e] = 0;
 		spx := 0;
 		epx := 0;
-		if s > 0 spx = measure_text_px(sbuf[:s] as string, input.font_h)[0];
-		if e > 0 epx = measure_text_px(ebuf[:e] as string, input.font_h)[0];
+		if s > 0 spx = measure_text_px(sbuf[:s] as string)[0];
+		if e > 0 epx = measure_text_px(ebuf[:e] as string)[0];
 
 		rect := Bounds {
 			pos = .{content.pos[0] + spx - input.scroll, content.pos[1]},
@@ -89,17 +91,18 @@ input_paint :: fn(w: *Widget) {
 			content.pos[0] - input.scroll,
 			content.pos[1]
 		};
-		enqueue_draw_text(text, pos, false, s.colors.text_primary, input.font_h);
+		enqueue_draw_text(text, pos, false, s.colors.text_primary);
 	}
 
+	font_h := get_font_height(f);
 	if focused && (get_ms() - input.carret_start_ms) % 1600 < 800 {
 		bounds := Bounds {
 			pos = .{
 				content.pos[0] + cursor_px - input.scroll,
-				content.pos[1] + content.size[1] - input.font_h,
+				content.pos[1] + content.size[1] - font_h,
 			},
 			size = .{
-				2, input.font_h
+				2, font_h
 			}
 		};
 		enqueue_box_command(bounds, s.colors.accent);
@@ -108,8 +111,9 @@ input_paint :: fn(w: *Widget) {
 
 input_measure :: fn(w: *Widget, availw: int, int) {
 	input := cast(*Input, w);
+	font_h := get_font_height(f);
 	text := input.text_buf[:input.text_len] as string;
-	w.content_size = .{availw, input.font_h};
+	w.content_size = .{availw, font_h};
 }
 
 delete_selection :: fn(input: *Input) {
@@ -181,7 +185,7 @@ input_on_event :: fn(w: *Widget, e: *WidgetEvent) {
 	input := cast(*Input, w);
 	switch e.tag {
 		case .GainFocus: {
-			start_text_input();
+			start_text_input(w.bounds_abs);
 			input.carret_start_ms = get_ms();
 		}
 		case .LoseFocus: {
@@ -275,7 +279,6 @@ make_input :: fn(placeholder: string = "") -> *Widget {
 	input.w.padding = .{6, 6, 6, 6};
 	input.w.desired_w = input_default_w;
 	input.placeholder = placeholder;
-	input.font_h = 20;
 	input.sel_start = -1;
 	input.sel_end = 0;
 	input.max_chars = 32;

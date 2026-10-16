@@ -130,6 +130,7 @@ button_vtable: WidgetVTable = .{
 make_button :: fn(label: string) -> *Widget {
 	button := make_widget(Button, &button_vtable);
 	button.label = label;
+	button.w.padding = .{8, 8, 8, 8};
 	return &button.w;
 }
 

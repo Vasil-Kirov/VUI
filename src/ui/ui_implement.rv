@@ -32,7 +32,11 @@ memory_free :: fn(p: ?*) {
 	free(p);
 }
 
-measure_text_px :: fn(text: string, font_h: int = 20) -> iv2 {
+get_font_height :: fn(font: *Font) -> int {
+	return ttf.GetFontHeight(font);
+}
+
+measure_text_px :: fn(text: string) -> iv2 {
 	width: i32;
 	ttf.MeasureString(f, text.data, len(text) as uint, 0, &width, null);
 	height := ttf.GetFontHeight(f);
@@ -44,7 +48,7 @@ measure_text_px :: fn(text: string, font_h: int = 20) -> iv2 {
 	return .{width as int, total_height as int};
 }
 
-start_text_input :: fn() {
+start_text_input :: fn(Bounds) {
 	input.start_typing();
 }
 

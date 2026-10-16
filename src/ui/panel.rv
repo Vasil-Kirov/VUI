@@ -209,6 +209,11 @@ panel_set_alignment :: fn(w: *Widget, align: Align) {
 	p.align_items = align;
 }
 
+panel_set_justify :: fn(w: *Widget, justify: Justify) {
+	p := cast(*Panel, w);
+	p.justify = justify;
+}
+
 panel_set_gap :: fn(w: *Widget, gap: int) {
 	p := cast(*Panel, w);
 	p.gap = gap;
@@ -248,6 +253,8 @@ make_panel :: fn(dir: Direction, is_card := false) -> *Widget {
 	panel.dir = dir;
 	panel.is_card = is_card;
 	panel.align_items = .Center;
+	panel.gap = 8;
+	panel.justify = .Center;
 	if is_card {
 		panel.w.padding = .{8, 8, 8, 8};
 	}
