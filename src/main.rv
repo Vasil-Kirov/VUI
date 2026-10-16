@@ -173,7 +173,7 @@ main :: fn() -> i32 {
 
 					txt := cmd.text;
 					pos := px_size_to_screen(txt.pos);
-					sz := ui.measure_text(txt.text, ttf.GetFontHeight(font));
+					sz := ui.measure_text(txt.text);
 					if txt.centered {
 						pos -= sz/.{2, 2};
 					}

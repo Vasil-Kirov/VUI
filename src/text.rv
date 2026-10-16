@@ -20,7 +20,7 @@ make_text_engine :: fn() {
 }
 
 draw_text :: fn(rend: *r.Renderer, font: *ttf.Font, text: string, color: v4, pos: v2) #nocheck {
-	sz := ui.measure_text(text, ttf.GetFontHeight(font));
+	sz := ui.measure_text(text);
 	pxszi := ui.measure_text_px(text);
 	pxsz := v2 {pxszi[0] as f32, pxszi[1] as f32};
 	tsz := pxsz/v2{1600, 900};
